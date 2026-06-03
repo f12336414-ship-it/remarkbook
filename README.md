@@ -60,8 +60,8 @@ release/windows/RemarkBook-Windows-Portable.zip
 三平台安装包通过 GitHub Actions 构建。推送 `v*` 标签会自动创建 GitHub Release，并分别在 Windows、macOS、Linux runner 上生成安装包：
 
 ```bash
-git tag v0.1.3
-git push origin v0.1.3
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 也可以在 Actions 页面手动运行 `Release` workflow。手动运行时会把各平台构建产物上传为 workflow artifacts，方便下载测试。

@@ -1,96 +1,79 @@
-<div align="center">
+# RemarkBook
 
-# 🍦 RemarkBook · 备忘小窗
+RemarkBook 是一个用 Tauri + React 构建的桌面备忘录/待办小窗。它平时保持轻量悬浮，展开后可以管理今日任务、历史记录、主题和窗口置顶状态。数据保存在本机 WebView 存储里，不需要账号，也不会上传到云端。
 
-**A cute, Mac-style floating to-do widget that lives on your desktop.**
-**一个可爱、Mac 风格的桌面浮窗备忘小工具。**
+![RemarkBook 应用截图](docs/assets/remarkbook-screenshot.png)
 
-[English](#english) · [中文](#中文)
+## 功能
 
-</div>
+- 今日任务视图：默认聚焦今天需要处理的事项。
+- 已完成自动下沉：今日列表中，已完成任务会自动排到最下面。
+- 过期未完成自动顺延：过去日期还没完成的任务会继续出现在今天任务里。
+- 历史记录：按周和日期折叠展示，支持搜索和状态筛选。
+- 历史全屏查看：点击黄色按钮，或双击窗口顶部，可以全屏展示历史；再次点击/双击恢复。
+- 小窗模式：红色按钮可收起为迷你悬浮条。
+- 置顶和透明度：支持窗口置顶，置顶时自动降低透明度，减少遮挡。
+- 主题设置：支持亮/暗模式、预设主题、强调色、字体大小和透明度。
+- 中英文界面：可在设置里切换语言。
 
----
+## 下载
 
-## English
+从 [GitHub Releases](https://github.com/f12336414-ship-it/remarkbook/releases) 下载对应系统安装包。
 
-RemarkBook is a tiny always-available notes & to-do window built with **Tauri + React**. It stays out of your way as a frosted mini-pill, and expands into a soft macaron-cream panel when you need it. Everything is stored locally on your machine — no account, no cloud.
+| 平台 | 推荐文件 | 说明 |
+| --- | --- | --- |
+| Windows | `.msi` 或 `.exe` | 双击安装。也可以使用项目里的 Windows portable zip。 |
+| macOS | `.dmg` | 打开后拖入 Applications。未签名版本首次打开可能需要右键选择“打开”。 |
+| Linux | `.AppImage` 或 `.deb` | AppImage 可直接运行，deb 可用系统包管理器安装。 |
 
-### ✨ Features
-- **Today view** — the main window shows only today's to-dos, kept clean and focused.
-- **Weekly folder history** — past items are grouped Monday–Sunday into collapsible week → day folders you can browse and search.
-- **Quick capture** — the input is hidden until you tap **+**, so the window stays tidy.
-- **Macaron themes** — 6 presets (Cream 🍦 / Sakura 🌸 / Mint 🌿 / Lavender 💜 / Sea salt 🧊 / Midnight 🌙), plus custom accent color, light/dark mode, font size, and opacity.
-- **Mac-style chrome** — frameless rounded window with traffic-light controls and a frosted look.
-- **Mini floating mode** — collapse into a small always-handy pill in the corner.
-- **Always on top** — pin the window above everything; opacity drops to 20% automatically so it never blocks your view, and restores when unpinned.
-- **Bilingual** — switch between 中文 and English anytime in Settings.
-- **Local-first** — all data lives in your browser's localStorage; nothing leaves your device.
+## 本地开发
 
-### 📦 Download & Run
-Grab the package for your OS from the [**Releases**](../../releases) page:
+需要 Node.js 20+ 和 Rust 工具链。
 
-| OS | File | How to run |
-|----|------|-----------|
-| **Windows** | `RemarkBook_x64-setup.exe` | Double-click to install, then launch. |
-| **macOS** | `RemarkBook_universal.dmg` | Open the `.dmg`, drag the app to Applications. (Intel + Apple Silicon) |
-| **Linux** | `RemarkBook_amd64.AppImage` | `chmod +x` it and run directly — no install needed. |
-
-> macOS may warn the app is from an unidentified developer — right-click → Open the first time.
-> Windows needs WebView2 (preinstalled on Windows 10/11).
-
-### 🛠️ Build from source
 ```bash
 npm install
-npm run tauri:dev     # run in development
-npm run tauri:build   # produce a native package for your current OS
+npm run tauri:dev
 ```
-Requires Node 20+ and the Rust toolchain.
 
-### 🧱 Tech stack
-Tauri 2 · React 19 · TypeScript · Vite · lucide-react
+常用命令：
 
----
-
-## 中文
-
-RemarkBook 是一个用 **Tauri + React** 做的桌面浮窗备忘小工具。平时它是一颗毛玻璃小药丸，安静待在角落；需要时展开成柔软的马卡龙奶油面板。所有数据都只保存在你本地，不需要账号，不上传云端。
-
-### ✨ 功能
-- **今日视图** —— 主窗口只显示「今天」的待办，干净专注。
-- **按周文件夹历史** —— 过去的记录按周一到周日分组，折叠成「周 → 天」文件夹，可浏览、可搜索。
-- **快速记录** —— 输入框默认隐藏，点 **+** 才出现，界面始终清爽。
-- **马卡龙主题** —— 6 个预设（奶油 🍦 / 樱花 🌸 / 薄荷 🌿 / 薰衣草 💜 / 海盐 🧊 / 深夜 🌙），并可自定义主色、浅/深色、字号、透明度。
-- **Mac 风格外观** —— 无边框圆角窗口，三色交通灯控制，毛玻璃质感。
-- **迷你浮窗模式** —— 一键收起成角落里的小药丸，随手可用。
-- **窗口置顶** —— 钉在所有窗口最前；置顶时透明度自动降到 20%，不挡视线，取消置顶后恢复。
-- **中英双语** —— 在设置里随时切换中文 / English。
-- **本地优先** —— 所有数据存在本地，不离开你的设备。
-
-### 📦 下载与运行
-在 [**Releases**](../../releases) 页面下载对应系统的包：
-
-| 系统 | 文件 | 运行方式 |
-|------|------|---------|
-| **Windows** | `RemarkBook_x64-setup.exe` | 双击安装后启动。 |
-| **macOS** | `RemarkBook_universal.dmg` | 打开 `.dmg`，把应用拖进「应用程序」。（兼容 Intel 与 Apple 芯片）|
-| **Linux** | `RemarkBook_amd64.AppImage` | `chmod +x` 后直接运行，免安装。 |
-
-> macOS 首次打开若提示「来自身份不明的开发者」，右键 →「打开」即可。
-> Windows 需要 WebView2（Win10/11 已预装）。
-
-### 🛠️ 从源码构建
 ```bash
-npm install
-npm run tauri:dev     # 开发运行
-npm run tauri:build   # 为当前系统打包
+npm run lint
+npm run build
+npm run tauri:build
 ```
-需要 Node 20+ 和 Rust 工具链。
 
-### 🧱 技术栈
-Tauri 2 · React 19 · TypeScript · Vite · lucide-react
+## 发布和打包
 
----
+Windows 本机可以生成便携包：
 
-<div align="center">
-<sub>Made with 🍦 · Licensed under MIT</sub>
-</div>
+```powershell
+npm run package:windows
+```
+
+产物路径：
+
+```text
+release/windows/RemarkBook-Windows-Portable.zip
+```
+
+三平台安装包通过 GitHub Actions 构建。推送 `v*` 标签会自动创建 GitHub Release，并分别在 Windows、macOS、Linux runner 上生成安装包：
+
+```bash
+git tag v0.1.3
+git push origin v0.1.3
+```
+
+也可以在 Actions 页面手动运行 `Release` workflow。手动运行时会把各平台构建产物上传为 workflow artifacts，方便下载测试。
+
+## 技术栈
+
+- Tauri 2
+- React 19
+- TypeScript
+- Vite
+- lucide-react
+
+## License
+
+MIT

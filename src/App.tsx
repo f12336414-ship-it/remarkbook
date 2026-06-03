@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react'
 import type { CSSProperties, MouseEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 type TaskStatus = 'todo' | 'done'
@@ -73,6 +73,7 @@ type ThemePreset = {
 
 type ViewSettings = {
   compact: boolean
+  historyFullscreen: boolean
   opacity: number
   pinned: boolean
   prevOpacity: number
@@ -89,6 +90,17 @@ type AppState = {
   view: ViewSettings
 }
 
+type PendingHeaderDrag = {
+  dragging: boolean
+  moving: boolean
+  pointerX: number
+  pointerY: number
+  windowX?: number
+  windowY?: number
+  x: number
+  y: number
+}
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown
@@ -98,6 +110,7 @@ declare global {
 const STORAGE_KEY = 'remarkbook-state-v3'
 const LEGACY_STORAGE_KEYS = ['remarkbook-state-v2', 'remarkbook-state-v1']
 const EXPANDED_SIZE = { height: 560, width: 420 }
+const HISTORY_SIZE = { height: 720, width: 520 }
 const COMPACT_SIZE = { height: 64, width: 320 }
 const PINNED_OPACITY = 0.2
 const WEEKDAYS_ZH = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -148,7 +161,9 @@ const I18N = {
     addTask: '添加任务',
     windowControls: '窗口控制',
     collapse: '收起为小窗',
+    expandHistory: '全屏查看历史',
     minimize: '最小化',
+    restoreHistory: '缩小历史',
     themeSettings: '主题与设置',
     closeSettings: '关闭设置',
     more: '更多',
@@ -192,7 +207,9 @@ const I18N = {
     addTask: 'Add task',
     windowControls: 'Window controls',
     collapse: 'Collapse to mini',
+    expandHistory: 'Fullscreen history',
     minimize: 'Minimize',
+    restoreHistory: 'Restore history',
     themeSettings: 'Theme & settings',
     closeSettings: 'Close settings',
     more: 'More',
@@ -229,6 +246,7 @@ const defaultState: AppState = {
   },
   view: {
     compact: false,
+    historyFullscreen: false,
     opacity: 0.94,
     pinned: false,
     prevOpacity: 0.94,
@@ -336,6 +354,25 @@ function todayTitle(timestamp: number, lang: Lang): string {
   }).format(date)
 }
 
+function sortTasksDoneLast(sourceTasks: Task[]): Task[] {
+  return [...sourceTasks].sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === 'done' ? 1 : -1
+    }
+
+    return b.createdAt.localeCompare(a.createdAt)
+  })
+}
+
+function isVisibleInToday(task: Task, todayKey: string): boolean {
+  const taskDayKey = dayStartKey(task.createdAt)
+  if (taskDayKey === todayKey) {
+    return true
+  }
+
+  return task.status === 'todo' && taskDayKey < todayKey
+}
+
 function buildWeekGroups(
   sourceTasks: Task[],
   lang: Lang,
@@ -357,7 +394,7 @@ function buildWeekGroups(
   return [...groups.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([key, weekTasks]) => {
-      const sortedTasks = [...weekTasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      const sortedTasks = sortTasksDoneLast(weekTasks)
       const daysMap = new Map<string, Task[]>()
 
       for (const task of sortedTasks) {
@@ -375,7 +412,7 @@ function buildWeekGroups(
         .map(([dayKey, dayTasks]) => ({
           key: dayKey,
           label: dayLabel(dayKey, lang),
-          tasks: dayTasks.sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+          tasks: sortTasksDoneLast(dayTasks),
         }))
 
       const prefix = key === currentKey ? `${I18N[lang].thisWeek} ` : ''
@@ -393,7 +430,7 @@ function isTauriApp() {
   return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)
 }
 
-async function applyWindowMode(compact: boolean) {
+async function applyWindowMode(compact: boolean, historyOpen: boolean, historyFullscreen: boolean) {
   if (!isTauriApp()) {
     return
   }
@@ -431,7 +468,37 @@ async function applyWindowMode(compact: boolean) {
   // own the chrome instead of the native title bar.
   await appWindow.setDecorations(false)
   await appWindow.setShadow(false)
-  await appWindow.setSize(new LogicalSize(EXPANDED_SIZE.width, EXPANDED_SIZE.height))
+
+  if (historyFullscreen) {
+    const monitor = (await currentMonitor()) || (await primaryMonitor())
+    if (monitor) {
+      await appWindow.setSize(
+        new LogicalSize(
+          Math.round(monitor.workArea.size.width / monitor.scaleFactor),
+          Math.round(monitor.workArea.size.height / monitor.scaleFactor),
+        ),
+      )
+      await appWindow.setPosition(
+        new PhysicalPosition(monitor.workArea.position.x, monitor.workArea.position.y),
+      )
+      return
+    }
+  }
+
+  const targetSize = historyOpen ? HISTORY_SIZE : EXPANDED_SIZE
+  await appWindow.setSize(new LogicalSize(targetSize.width, targetSize.height))
+
+  const monitor = (await currentMonitor()) || (await primaryMonitor())
+  if (monitor) {
+    const width = Math.round(targetSize.width * monitor.scaleFactor)
+    const height = Math.round(targetSize.height * monitor.scaleFactor)
+    await appWindow.setPosition(
+      new PhysicalPosition(
+        monitor.workArea.position.x + Math.round((monitor.workArea.size.width - width) / 2),
+        monitor.workArea.position.y + Math.round((monitor.workArea.size.height - height) / 2),
+      ),
+    )
+  }
 }
 
 async function applyAlwaysOnTop(onTop: boolean) {
@@ -442,12 +509,13 @@ async function applyAlwaysOnTop(onTop: boolean) {
   await getCurrentWindow().setAlwaysOnTop(onTop)
 }
 
-async function minimizeWindow() {
+async function beginWindowDrag() {
   if (!isTauriApp()) {
     return
   }
+
   const { getCurrentWindow } = await import('@tauri-apps/api/window')
-  await getCurrentWindow().minimize()
+  await getCurrentWindow().startDragging()
 }
 
 async function startWindowDrag(event: MouseEvent) {
@@ -460,8 +528,7 @@ async function startWindowDrag(event: MouseEvent) {
     return
   }
 
-  const { getCurrentWindow } = await import('@tauri-apps/api/window')
-  await getCurrentWindow().startDragging()
+  await beginWindowDrag()
 }
 
 function App() {
@@ -470,7 +537,8 @@ function App() {
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyStatus, setHistoryStatus] = useState<StatusFilter>('all')
   const [composing, setComposing] = useState(false)
-  const [currentTime] = useState(() => Date.now())
+  const [currentTime, setCurrentTime] = useState(() => Date.now())
+  const pendingHeaderDrag = useRef<PendingHeaderDrag | null>(null)
 
   const { tasks, weekNames, lang, theme, view } = state
   const t = I18N[lang]
@@ -481,12 +549,20 @@ function App() {
   )
 
   useEffect(() => {
-    void applyWindowMode(view.compact)
-  }, [view.compact])
+    void applyWindowMode(view.compact, view.panelOpen, view.historyFullscreen)
+  }, [view.compact, view.historyFullscreen, view.panelOpen])
 
   useEffect(() => {
     void applyAlwaysOnTop(view.compact || view.pinned)
   }, [view.compact, view.pinned])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 60_000)
+
+    return () => window.clearInterval(timer)
+  }, [])
 
   const persist = (nextState: AppState) => {
     setState(nextState)
@@ -504,7 +580,7 @@ function App() {
   const todayKey = useMemo(() => dayStartKey(new Date(currentTime).toISOString()), [currentTime])
 
   const todayTasks = useMemo(
-    () => tasks.filter((task) => dayStartKey(task.createdAt) === todayKey),
+    () => sortTasksDoneLast(tasks.filter((task) => isVisibleInToday(task, todayKey))),
     [tasks, todayKey],
   )
 
@@ -579,14 +655,138 @@ function App() {
 
   const toggleHistoryPanel = () => {
     updateView({
+      historyFullscreen: false,
       panel: 'history',
       panelOpen: !view.panelOpen,
       settingsOpen: false,
     })
   }
 
+  const toggleHistoryFullscreen = () => {
+    if (view.historyFullscreen) {
+      updateView({
+        historyFullscreen: false,
+        panelOpen: false,
+        settingsOpen: false,
+      })
+      return
+    }
+
+    updateView({
+      compact: false,
+      historyFullscreen: true,
+      panel: 'history',
+      panelOpen: true,
+      settingsOpen: false,
+    })
+  }
+
+  const handleTopDoubleClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement
+    if (target.closest('button, input, textarea')) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    pendingHeaderDrag.current = null
+    toggleHistoryFullscreen()
+  }
+
+  const handleTopMouseDown = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement
+    if (event.button !== 0 || target.closest('button, input, textarea')) {
+      return
+    }
+
+    event.stopPropagation()
+    pendingHeaderDrag.current = {
+      dragging: false,
+      moving: false,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+    }
+
+    if (!isTauriApp()) {
+      return
+    }
+
+    const pointerX = event.clientX
+    const pointerY = event.clientY
+    void (async () => {
+      const { cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window')
+      const [cursor, windowPosition] = await Promise.all([
+        cursorPosition(),
+        getCurrentWindow().outerPosition(),
+      ])
+
+      const pending = pendingHeaderDrag.current
+      if (!pending || pending.pointerX !== pointerX || pending.pointerY !== pointerY) {
+        return
+      }
+
+      pendingHeaderDrag.current = {
+        ...pending,
+        windowX: windowPosition.x,
+        windowY: windowPosition.y,
+        x: cursor.x,
+        y: cursor.y,
+      }
+    })()
+  }
+
+  const handleTopMouseMove = (event: MouseEvent<HTMLElement>) => {
+    const pending = pendingHeaderDrag.current
+    if (!pending || view.historyFullscreen || (event.buttons & 1) === 0) {
+      return
+    }
+
+    const distanceX = Math.abs(event.clientX - pending.pointerX)
+    const distanceY = Math.abs(event.clientY - pending.pointerY)
+    if (distanceX < 4 && distanceY < 4) {
+      return
+    }
+
+    if (
+      !isTauriApp() ||
+      pending.moving ||
+      pending.windowX === undefined ||
+      pending.windowY === undefined
+    ) {
+      return
+    }
+
+    pendingHeaderDrag.current = { ...pending, dragging: true, moving: true }
+    void (async () => {
+      const { PhysicalPosition, cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window')
+      const cursor = await cursorPosition()
+      await getCurrentWindow().setPosition(
+        new PhysicalPosition(
+          pending.windowX! + cursor.x - pending.x,
+          pending.windowY! + cursor.y - pending.y,
+        ),
+      )
+
+      const latest = pendingHeaderDrag.current
+      if (!latest) {
+        return
+      }
+
+      pendingHeaderDrag.current = {
+        ...latest,
+        moving: false,
+      }
+    })()
+  }
+
+  const clearPendingTopDrag = () => {
+    pendingHeaderDrag.current = null
+  }
+
   const openSettingsDialog = () => {
-    updateView({ panelOpen: false, settingsOpen: true })
+    updateView({ historyFullscreen: false, panelOpen: false, settingsOpen: true })
   }
 
   const closeSettingsDialog = () => {
@@ -597,6 +797,7 @@ function App() {
     <main
       className="app"
       data-compact={view.compact}
+      data-history-fullscreen={view.historyFullscreen}
       data-panel-open={view.panelOpen}
       data-settings-open={view.settingsOpen}
       data-theme={theme.mode}
@@ -609,23 +810,50 @@ function App() {
         } as CSSProperties
       }
     >
-      <section className="memo-shell" onMouseDown={startWindowDrag}>
+      <section
+        className="memo-shell"
+        onMouseDown={startWindowDrag}
+        onMouseMove={handleTopMouseMove}
+        onMouseUp={clearPendingTopDrag}
+      >
         {view.compact ? (
           <CompactTab opacity={view.opacity} t={t} title={latestTitle} todoCount={todayTodoCount} updateView={updateView} />
         ) : (
           <>
-            <header className="memo-top">
+            <header
+              className="memo-top"
+              onDoubleClick={handleTopDoubleClick}
+              onMouseDown={handleTopMouseDown}
+              onMouseMove={handleTopMouseMove}
+              onMouseUp={clearPendingTopDrag}
+            >
               <div className="traffic-lights" aria-label={t.windowControls}>
                 <button
                   className="light red"
-                  onClick={() => updateView({ compact: true, panelOpen: false, settingsOpen: false })}
+                  onClick={() =>
+                    updateView({
+                      compact: true,
+                      historyFullscreen: false,
+                      panelOpen: false,
+                      settingsOpen: false,
+                    })
+                  }
                   title={t.collapse}
                   type="button"
                 >
                   <X size={9} strokeWidth={3} />
                 </button>
-                <button className="light yellow" onClick={() => void minimizeWindow()} title={t.minimize} type="button">
-                  <Minimize2 size={9} strokeWidth={3} />
+                <button
+                  className="light yellow"
+                  onClick={toggleHistoryFullscreen}
+                  title={view.historyFullscreen ? t.restoreHistory : t.expandHistory}
+                  type="button"
+                >
+                  {view.historyFullscreen ? (
+                    <Minimize2 size={9} strokeWidth={3} />
+                  ) : (
+                    <Maximize2 size={9} strokeWidth={3} />
+                  )}
                 </button>
                 <button
                   className="light green"
@@ -1061,7 +1289,9 @@ function WeeklyHistoryList({
   t: Strings
   weeks: WeekGroup[]
 }) {
-  const [openWeeks, setOpenWeeks] = useState<Set<string>>(() => new Set())
+  const [openWeeks, setOpenWeeks] = useState<Set<string>>(
+    () => new Set(weeks[0] ? [weeks[0].key] : []),
+  )
 
   const toggleWeek = (key: string) => {
     setOpenWeeks((prev) => {

@@ -50,6 +50,12 @@
   width: 100vw;
 }
 
+.app[data-history-fullscreen='true'] {
+  align-items: stretch;
+  justify-items: stretch;
+  padding: 0;
+}
+
 .memo-shell {
   background:
     linear-gradient(
@@ -73,6 +79,18 @@
 .app[data-panel-open='true'] .memo-shell,
 .app[data-settings-open='true'] .memo-shell {
   height: min(560px, calc(100vh - 32px));
+}
+
+.app[data-panel-open='true'] .memo-shell {
+  height: min(720px, calc(100vh - 32px));
+  width: min(520px, calc(100vw - 32px));
+}
+
+.app[data-history-fullscreen='true'] .memo-shell {
+  border-radius: 0;
+  height: 100vh;
+  max-height: none;
+  width: 100vw;
 }
 
 .app[data-compact='true'] .memo-shell {
@@ -248,6 +266,11 @@ button:disabled {
 
 .app[data-panel-open='true'] .memo-body {
   max-height: none;
+}
+
+.app[data-history-fullscreen='true'] .memo-body {
+  flex: 0 0 auto;
+  max-height: min(34vh, 260px);
 }
 
 /* ===== Settings modal ===== */
@@ -615,6 +638,25 @@ button:disabled {
   overflow: auto;
   padding: 12px;
   scrollbar-width: thin;
+}
+
+.app[data-panel-open='true'] .hidden-panel {
+  max-height: min(500px, calc(100vh - 118px));
+}
+
+.app[data-history-fullscreen='true'] .hidden-panel {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+.app[data-history-fullscreen='true'] .panel-content {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.app[data-history-fullscreen='true'] .history-list {
+  min-height: 0;
+  overflow: auto;
 }
 
 .panel-tabs,

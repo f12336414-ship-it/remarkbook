@@ -1,6 +1,5 @@
 name: Release
 
-# Push a tag like `v0.1.0` to build and publish packages for all three OSes.
 on:
   push:
     tags:
@@ -12,27 +11,31 @@ permissions:
 
 jobs:
   build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # One universal .dmg/.app covering Intel + Apple Silicon
-          - platform: macos-latest
+          - label: Windows
+            platform: windows-latest
+            args: ''
+            rust-targets: ''
+            artifact-name: remarkbook-windows
+          - label: macOS universal
+            platform: macos-latest
             args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-          # .AppImage + .deb (AppImage runs directly, no install)
-          - platform: ubuntu-22.04
+            artifact-name: remarkbook-macos-universal
+          - label: Linux
+            platform: ubuntu-22.04
             args: ''
             rust-targets: ''
-          # .msi + .exe (NSIS) installers
-          - platform: windows-latest
-            args: ''
-            rust-targets: ''
-
-    runs-on: ${{ matrix.platform }}
+            artifact-name: remarkbook-linux
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -56,14 +59,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf
 
-      - name: Install frontend dependencies
-        run: npm install
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Build and release
+      - name: Build installers
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: npm run tauri:build -- ${{ matrix.args }}
+
+      - name: Build installers and publish release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,12 +79,26 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'RemarkBook ${{ github.ref_name }}'
           releaseBody: |
-            🍦 RemarkBook ${{ github.ref_name }}
+            RemarkBook ${{ github.ref_name }}
 
-            Download the package for your OS below:
-            - Windows: `*-setup.exe`
-            - macOS (Intel + Apple Silicon): `*_universal.dmg`
-            - Linux: `*.AppImage` (run directly)
+            下载对应系统安装包：
+            - Windows: `.msi` 或 `.exe`
+            - macOS: `.dmg`
+            - Linux: `.AppImage` 或 `.deb`
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          if-no-files-found: warn
+          path: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.app.tar.gz

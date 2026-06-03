@@ -14,6 +14,10 @@ release
 *.local
 .claude/settings.local.json
 
+# Rust / Tauri build output
+src-tauri/target
+target
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

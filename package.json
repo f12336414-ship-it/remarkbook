@@ -1,7 +1,7 @@
 {
   "name": "remarkbook",
   "private": false,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "repository": {
     "type": "git",
@@ -13,6 +13,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1"

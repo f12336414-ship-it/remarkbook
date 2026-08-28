@@ -1,8 +1,11 @@
 import {
+  Bell,
+  BellRing,
   Check,
   ChevronRight,
   Circle,
   Folder,
+  GripVertical,
   History,
   Languages,
   ListTodo,
@@ -10,6 +13,7 @@ import {
   Minimize2,
   Moon,
   Palette,
+  Pencil,
   Pin,
   Plus,
   Search,
@@ -28,6 +32,8 @@ type ThemeMode = 'light' | 'dark'
 type PanelTab = 'history' | 'settings'
 type Lang = 'zh' | 'en'
 
+const WINDOW_DRAG_EXCLUSION_SELECTOR = 'button, input, textarea, [data-no-window-drag]'
+
 type Task = {
   id: string
   tabId?: string // legacy field, kept for backward-compatible storage
@@ -37,6 +43,8 @@ type Task = {
   createdAt: string
   updatedAt: string
   completedAt?: string
+  reminderAt?: string
+  reminderNotifiedAt?: string
 }
 
 type DayGroup = {
@@ -90,17 +98,6 @@ type AppState = {
   view: ViewSettings
 }
 
-type PendingHeaderDrag = {
-  dragging: boolean
-  moving: boolean
-  pointerX: number
-  pointerY: number
-  windowX?: number
-  windowY?: number
-  x: number
-  y: number
-}
-
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown
@@ -151,7 +148,8 @@ const I18N = {
     noHistory: '还没有记录。',
     taskUnit: '条',
     writeSomething: '写点事...',
-    searchTask: '搜索任务',
+    searchTask: '搜索所有记录...',
+    searchResults: '搜索结果',
     all: '全部',
     todo: '未完成',
     done: '已完成',
@@ -159,6 +157,18 @@ const I18N = {
     emptyTodo: '这里还没有待办。',
     emptyTask: '暂无任务。',
     addTask: '添加任务',
+    editTask: '修改任务',
+    save: '保存',
+    cancel: '取消',
+    taskTitle: '任务标题',
+    setReminder: '设置提醒',
+    changeReminder: '修改提醒',
+    reminderTime: '提醒时间',
+    saveReminder: '保存提醒',
+    removeReminder: '取消提醒',
+    reminderDue: '到时间了',
+    reminded: '已提醒',
+    dragWindow: '拖动窗口',
     windowControls: '窗口控制',
     collapse: '收起为小窗',
     expandHistory: '全屏查看历史',
@@ -197,7 +207,8 @@ const I18N = {
     noHistory: 'No records yet.',
     taskUnit: '',
     writeSomething: 'Write something...',
-    searchTask: 'Search tasks',
+    searchTask: 'Search all records...',
+    searchResults: 'Search results',
     all: 'All',
     todo: 'To-do',
     done: 'Done',
@@ -205,6 +216,18 @@ const I18N = {
     emptyTodo: 'Nothing to do yet.',
     emptyTask: 'No tasks.',
     addTask: 'Add task',
+    editTask: 'Edit task',
+    save: 'Save',
+    cancel: 'Cancel',
+    taskTitle: 'Task title',
+    setReminder: 'Set reminder',
+    changeReminder: 'Change reminder',
+    reminderTime: 'Reminder time',
+    saveReminder: 'Save reminder',
+    removeReminder: 'Remove reminder',
+    reminderDue: 'Reminder due',
+    reminded: 'Reminded',
+    dragWindow: 'Drag window',
     windowControls: 'Window controls',
     collapse: 'Collapse to mini',
     expandHistory: 'Fullscreen history',
@@ -223,6 +246,66 @@ type Strings = (typeof I18N)['zh']
 
 const createId = () => crypto.randomUUID()
 const nowIso = () => new Date().toISOString()
+
+function toDateTimeLocalValue(iso: string): string {
+  const date = new Date(iso)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function defaultReminderValue(): string {
+  const date = new Date(Date.now() + 60 * 60 * 1000)
+  date.setMinutes(Math.ceil(date.getMinutes() / 5) * 5, 0, 0)
+  return toDateTimeLocalValue(date.toISOString())
+}
+
+function formatReminderTime(iso: string, lang: Lang): string {
+  return new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: 'short',
+  }).format(new Date(iso))
+}
+
+async function ensureNotificationPermission(): Promise<boolean> {
+  if (isTauriApp()) {
+    const { isPermissionGranted, requestPermission } = await import(
+      '@tauri-apps/plugin-notification'
+    )
+    if (await isPermissionGranted()) {
+      return true
+    }
+    return (await requestPermission()) === 'granted'
+  }
+
+  if (!('Notification' in window)) {
+    return false
+  }
+  if (Notification.permission === 'granted') {
+    return true
+  }
+  return (await Notification.requestPermission()) === 'granted'
+}
+
+async function sendSystemReminder(task: Task, lang: Lang): Promise<void> {
+  try {
+    if (!(await ensureNotificationPermission())) {
+      return
+    }
+
+    const body = task.note || (lang === 'zh' ? '打开 RemarkBook 查看这条记录。' : 'Open RemarkBook to view this record.')
+    if (isTauriApp()) {
+      const { sendNotification } = await import('@tauri-apps/plugin-notification')
+      sendNotification({ title: task.title, body })
+      return
+    }
+
+    new Notification(task.title, { body })
+  } catch {
+    // The in-app reminder remains visible if the OS notification is unavailable.
+  }
+}
 
 const defaultState: AppState = {
   tasks: [
@@ -524,10 +607,12 @@ async function startWindowDrag(event: MouseEvent) {
   }
 
   const target = event.target as HTMLElement
-  if (target.closest('button, input, textarea')) {
+  if (target.closest(WINDOW_DRAG_EXCLUSION_SELECTOR)) {
     return
   }
 
+  event.preventDefault()
+  event.stopPropagation()
   await beginWindowDrag()
 }
 
@@ -538,7 +623,9 @@ function App() {
   const [historyStatus, setHistoryStatus] = useState<StatusFilter>('all')
   const [composing, setComposing] = useState(false)
   const [currentTime, setCurrentTime] = useState(() => Date.now())
-  const pendingHeaderDrag = useRef<PendingHeaderDrag | null>(null)
+  const [reminderToast, setReminderToast] = useState<Task | null>(null)
+  const notifiedReminderKeys = useRef(new Set<string>())
+  const pendingHeaderDrag = useRef<{ x: number; y: number } | null>(null)
 
   const { tasks, weekNames, lang, theme, view } = state
   const t = I18N[lang]
@@ -577,6 +664,43 @@ function App() {
     persist({ ...state, theme: { ...theme, ...nextTheme } })
   }
 
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = Date.now()
+      const dueTasks = tasks.filter((task) => {
+        if (!task.reminderAt || task.reminderNotifiedAt || task.status === 'done') {
+          return false
+        }
+        const reminderKey = `${task.id}:${task.reminderAt}`
+        return new Date(task.reminderAt).getTime() <= now && !notifiedReminderKeys.current.has(reminderKey)
+      })
+
+      if (dueTasks.length === 0) {
+        return
+      }
+
+      for (const task of dueTasks) {
+        notifiedReminderKeys.current.add(`${task.id}:${task.reminderAt}`)
+      }
+
+      const notifiedAt = nowIso()
+      const dueIds = new Set(dueTasks.map((task) => task.id))
+      const nextState = {
+        ...state,
+        tasks: tasks.map((task) =>
+          dueIds.has(task.id) ? { ...task, reminderNotifiedAt: notifiedAt } : task,
+        ),
+      }
+      persist(nextState)
+      setReminderToast(dueTasks[0])
+      dueTasks.forEach((task) => void sendSystemReminder(task, lang))
+    }
+
+    checkReminders()
+    const timer = window.setInterval(checkReminders, 15_000)
+    return () => window.clearInterval(timer)
+  }, [lang, state, tasks])
+
   const todayKey = useMemo(() => dayStartKey(new Date(currentTime).toISOString()), [currentTime])
 
   const todayTasks = useMemo(
@@ -595,6 +719,19 @@ function App() {
 
     return buildWeekGroups(filtered, lang, weekNames, currentKey)
   }, [currentKey, historyQuery, historyStatus, lang, tasks, weekNames])
+
+  const searchResults = useMemo(() => {
+    const locale = lang === 'zh' ? 'zh-CN' : 'en-US'
+    const query = historyQuery.trim().toLocaleLowerCase(locale)
+    if (!query) {
+      return []
+    }
+    return sortTasksDoneLast(
+      tasks.filter((task) =>
+        `${task.title} ${task.note}`.toLocaleLowerCase(locale).includes(query),
+      ),
+    )
+  }, [historyQuery, lang, tasks])
 
   const todayCount = todayTasks.length
   const todayTodoCount = todayTasks.filter((task) => task.status === 'todo').length
@@ -633,7 +770,49 @@ function App() {
           ? {
               ...task,
               completedAt: status === 'done' ? nowIso() : undefined,
+              reminderAt: status === 'done' ? undefined : task.reminderAt,
+              reminderNotifiedAt: status === 'done' ? undefined : task.reminderNotifiedAt,
               status,
+              updatedAt: nowIso(),
+            }
+          : task,
+      ),
+    })
+  }
+
+  const updateTask = (taskId: string, title: string, note: string) => {
+    const nextTitle = title.trim()
+    if (!nextTitle) {
+      return
+    }
+
+    persist({
+      ...state,
+      tasks: tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              title: nextTitle,
+              note: note.trim(),
+              updatedAt: nowIso(),
+            }
+          : task,
+      ),
+    })
+  }
+
+  const updateTaskReminder = (taskId: string, reminderAt?: string) => {
+    if (reminderAt) {
+      void ensureNotificationPermission()
+    }
+    persist({
+      ...state,
+      tasks: tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              reminderAt,
+              reminderNotifiedAt: undefined,
               updatedAt: nowIso(),
             }
           : task,
@@ -683,110 +862,57 @@ function App() {
 
   const handleTopDoubleClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement
-    if (target.closest('button, input, textarea')) {
+    if (target.closest(WINDOW_DRAG_EXCLUSION_SELECTOR)) {
       return
     }
 
+    pendingHeaderDrag.current = null
     event.preventDefault()
     event.stopPropagation()
-    pendingHeaderDrag.current = null
     toggleHistoryFullscreen()
   }
 
-  const handleTopMouseDown = (event: MouseEvent<HTMLElement>) => {
+  const handleHeaderMouseDown = (event: MouseEvent<HTMLElement>) => {
+    if (!isTauriApp() || event.button !== 0) {
+      return
+    }
+
     const target = event.target as HTMLElement
-    if (event.button !== 0 || target.closest('button, input, textarea')) {
+    if (target.closest(WINDOW_DRAG_EXCLUSION_SELECTOR)) {
       return
     }
 
-    event.stopPropagation()
-    pendingHeaderDrag.current = {
-      dragging: false,
-      moving: false,
-      pointerX: event.clientX,
-      pointerY: event.clientY,
-      x: event.clientX,
-      y: event.clientY,
-    }
-
-    if (!isTauriApp()) {
-      return
-    }
-
-    const pointerX = event.clientX
-    const pointerY = event.clientY
-    void (async () => {
-      const { cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window')
-      const [cursor, windowPosition] = await Promise.all([
-        cursorPosition(),
-        getCurrentWindow().outerPosition(),
-      ])
-
-      const pending = pendingHeaderDrag.current
-      if (!pending || pending.pointerX !== pointerX || pending.pointerY !== pointerY) {
-        return
-      }
-
-      pendingHeaderDrag.current = {
-        ...pending,
-        windowX: windowPosition.x,
-        windowY: windowPosition.y,
-        x: cursor.x,
-        y: cursor.y,
-      }
-    })()
+    // Keep an unmoved click available for the header's double-click action.
+    pendingHeaderDrag.current = event.detail > 1 ? null : { x: event.clientX, y: event.clientY }
   }
 
-  const handleTopMouseMove = (event: MouseEvent<HTMLElement>) => {
+  const handleHeaderMouseMove = (event: MouseEvent<HTMLElement>) => {
     const pending = pendingHeaderDrag.current
-    if (!pending || view.historyFullscreen || (event.buttons & 1) === 0) {
+    if (!pending) {
       return
     }
 
-    const distanceX = Math.abs(event.clientX - pending.pointerX)
-    const distanceY = Math.abs(event.clientY - pending.pointerY)
-    if (distanceX < 4 && distanceY < 4) {
+    if ((event.buttons & 1) === 0) {
+      pendingHeaderDrag.current = null
       return
     }
 
-    if (
-      !isTauriApp() ||
-      pending.moving ||
-      pending.windowX === undefined ||
-      pending.windowY === undefined
-    ) {
+    const distance = Math.hypot(event.clientX - pending.x, event.clientY - pending.y)
+    if (distance < 3) {
       return
     }
 
-    pendingHeaderDrag.current = { ...pending, dragging: true, moving: true }
-    void (async () => {
-      const { PhysicalPosition, cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window')
-      const cursor = await cursorPosition()
-      await getCurrentWindow().setPosition(
-        new PhysicalPosition(
-          pending.windowX! + cursor.x - pending.x,
-          pending.windowY! + cursor.y - pending.y,
-        ),
-      )
-
-      const latest = pendingHeaderDrag.current
-      if (!latest) {
-        return
-      }
-
-      pendingHeaderDrag.current = {
-        ...latest,
-        moving: false,
-      }
-    })()
+    pendingHeaderDrag.current = null
+    event.preventDefault()
+    void beginWindowDrag()
   }
 
-  const clearPendingTopDrag = () => {
+  const clearPendingHeaderDrag = () => {
     pendingHeaderDrag.current = null
   }
 
   const openSettingsDialog = () => {
-    updateView({ historyFullscreen: false, panelOpen: false, settingsOpen: true })
+    updateView({ settingsOpen: true })
   }
 
   const closeSettingsDialog = () => {
@@ -810,12 +936,7 @@ function App() {
         } as CSSProperties
       }
     >
-      <section
-        className="memo-shell"
-        onMouseDown={startWindowDrag}
-        onMouseMove={handleTopMouseMove}
-        onMouseUp={clearPendingTopDrag}
-      >
+      <section className="memo-shell">
         {view.compact ? (
           <CompactTab opacity={view.opacity} t={t} title={latestTitle} todoCount={todayTodoCount} updateView={updateView} />
         ) : (
@@ -823,11 +944,12 @@ function App() {
             <header
               className="memo-top"
               onDoubleClick={handleTopDoubleClick}
-              onMouseDown={handleTopMouseDown}
-              onMouseMove={handleTopMouseMove}
-              onMouseUp={clearPendingTopDrag}
+              onMouseDown={handleHeaderMouseDown}
+              onMouseLeave={handleHeaderMouseMove}
+              onMouseMove={handleHeaderMouseMove}
+              onMouseUp={clearPendingHeaderDrag}
             >
-              <div className="traffic-lights" aria-label={t.windowControls}>
+              <div className="traffic-lights" aria-label={t.windowControls} data-no-window-drag>
                 <button
                   className="light red"
                   onClick={() =>
@@ -886,20 +1008,45 @@ function App() {
             </header>
 
             <section className="memo-body">
-              <section className="soft-section">
-                <div className="section-line">
-                  <ListTodo size={14} />
-                  <span>{t.todayAll}</span>
+              <label className="search-box global-search">
+                <Search size={15} />
+                <input
+                  aria-label={t.searchTask}
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                  placeholder={t.searchTask}
+                  value={historyQuery}
+                />
+                {historyQuery && (
                   <button
-                    className={composing ? 'add-toggle active' : 'add-toggle'}
-                    onClick={() => setComposing((value) => !value)}
-                    title={t.addTask}
+                    aria-label={t.cancel}
+                    className="search-clear"
+                    onClick={() => setHistoryQuery('')}
                     type="button"
                   >
-                    <Plus size={18} />
+                    <X size={14} />
                   </button>
+                )}
+              </label>
+              <section className="soft-section">
+                <div className="section-line">
+                  {historyQuery ? <Search size={14} /> : <ListTodo size={14} />}
+                  <span>
+                    {historyQuery
+                      ? `${t.searchResults} (${searchResults.length})`
+                      : t.todayAll}
+                  </span>
+                  {!historyQuery && (
+                    <button
+                      className={composing ? 'add-toggle active' : 'add-toggle'}
+                      onClick={() => setComposing((value) => !value)}
+                      title={t.addTask}
+                      type="button"
+                    >
+                      <Plus size={18} />
+                    </button>
+                  )}
                 </div>
-                {composing && (
+                {!historyQuery && composing && (
                   <form
                     className="quick-entry"
                     onSubmit={(event) => {
@@ -928,8 +1075,10 @@ function App() {
                   emptyText={t.emptyTask}
                   lang={lang}
                   onDelete={deleteTask}
+                  onReminderChange={updateTaskReminder}
                   onStatusChange={updateTaskStatus}
-                  tasks={todayTasks}
+                  onUpdate={updateTask}
+                  tasks={historyQuery ? searchResults : todayTasks}
                 />
               </section>
             </section>
@@ -941,7 +1090,9 @@ function App() {
                 historyWeeks={historyWeeks}
                 lang={lang}
                 onDelete={deleteTask}
+                onReminderChange={updateTaskReminder}
                 onStatusChange={updateTaskStatus}
+                onUpdate={updateTask}
                 openPanel={() => updateView({ panel: 'history', panelOpen: true, settingsOpen: false })}
                 panel="history"
                 setHistoryQuery={setHistoryQuery}
@@ -954,6 +1105,25 @@ function App() {
                 updateView={updateView}
                 view={view}
               />
+            )}
+
+            {reminderToast && (
+              <div className="reminder-toast" role="status">
+                <span className="reminder-toast-icon">
+                  <BellRing size={17} />
+                </span>
+                <div>
+                  <strong>{t.reminderDue}</strong>
+                  <span>{reminderToast.title}</span>
+                </div>
+                <button
+                  aria-label={t.cancel}
+                  onClick={() => setReminderToast(null)}
+                  type="button"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             )}
 
             {view.settingsOpen && (
@@ -989,9 +1159,73 @@ function CompactTab({
   todoCount: number
   updateView: (nextView: Partial<ViewSettings>) => void
 }) {
+  const pendingDrag = useRef<{ x: number; y: number } | null>(null)
+  const dragStarted = useRef(false)
+
+  const handleMouseDown = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) {
+      return
+    }
+
+    dragStarted.current = false
+    pendingDrag.current = { x: event.clientX, y: event.clientY }
+  }
+
+  const handleMouseMove = (event: MouseEvent<HTMLButtonElement>) => {
+    const pending = pendingDrag.current
+    if (!pending) {
+      return
+    }
+
+    if ((event.buttons & 1) === 0) {
+      pendingDrag.current = null
+      return
+    }
+
+    const distance = Math.hypot(event.clientX - pending.x, event.clientY - pending.y)
+    if (distance < 3) {
+      return
+    }
+
+    pendingDrag.current = null
+    dragStarted.current = true
+    event.preventDefault()
+    void beginWindowDrag()
+  }
+
+  const handleMouseUp = () => {
+    pendingDrag.current = null
+  }
+
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (dragStarted.current) {
+      dragStarted.current = false
+      event.preventDefault()
+      return
+    }
+
+    updateView({ compact: false })
+  }
+
   return (
     <div className="compact-tab">
-      <button className="compact-main" onClick={() => updateView({ compact: false })} title={t.expand} type="button">
+      <span
+        className="compact-drag-handle"
+        onMouseDown={startWindowDrag}
+        title={t.dragWindow}
+      >
+        <GripVertical size={15} />
+      </span>
+      <button
+        className="compact-main"
+        onClick={handleClick}
+        onMouseDown={handleMouseDown}
+        onMouseLeave={handleMouseMove}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        title={t.expand}
+        type="button"
+      >
         <Maximize2 size={15} />
         <span>{title}</span>
         <strong>{todoCount}</strong>
@@ -1065,7 +1299,9 @@ function SettingsDialog({
             historyWeeks={[]}
             lang={lang}
             onDelete={() => undefined}
+            onReminderChange={() => undefined}
             onStatusChange={() => undefined}
+            onUpdate={() => undefined}
             openPanel={() => undefined}
             panel="settings"
             setHistoryQuery={() => undefined}
@@ -1090,7 +1326,9 @@ function HiddenPanel({
   historyWeeks,
   lang,
   onDelete,
+  onReminderChange,
   onStatusChange,
+  onUpdate,
   openPanel,
   panel,
   setHistoryQuery,
@@ -1108,7 +1346,9 @@ function HiddenPanel({
   historyWeeks: WeekGroup[]
   lang: Lang
   onDelete: (taskId: string) => void
+  onReminderChange: (taskId: string, reminderAt?: string) => void
   onStatusChange: (taskId: string, status: TaskStatus) => void
+  onUpdate: (taskId: string, title: string, note: string) => void
   openPanel: (panel: PanelTab) => void
   panel: PanelTab
   setHistoryQuery: (query: string) => void
@@ -1162,7 +1402,9 @@ function HiddenPanel({
               emptyText={t.noMatch}
               lang={lang}
               onDelete={onDelete}
+              onReminderChange={onReminderChange}
               onStatusChange={onStatusChange}
+              onUpdate={onUpdate}
               t={t}
               weeks={historyWeeks}
             />
@@ -1277,7 +1519,9 @@ function WeeklyHistoryList({
   emptyText,
   lang,
   onDelete,
+  onReminderChange,
   onStatusChange,
+  onUpdate,
   t,
   weeks,
 }: {
@@ -1285,7 +1529,9 @@ function WeeklyHistoryList({
   emptyText: string
   lang: Lang
   onDelete: (taskId: string) => void
+  onReminderChange: (taskId: string, reminderAt?: string) => void
   onStatusChange: (taskId: string, status: TaskStatus) => void
+  onUpdate: (taskId: string, title: string, note: string) => void
   t: Strings
   weeks: WeekGroup[]
 }) {
@@ -1343,7 +1589,9 @@ function WeeklyHistoryList({
                         emptyText={t.emptyTask}
                         lang={lang}
                         onDelete={onDelete}
+                        onReminderChange={onReminderChange}
                         onStatusChange={onStatusChange}
+                        onUpdate={onUpdate}
                         tasks={day.tasks}
                       />
                     </section>
@@ -1363,46 +1611,243 @@ function TaskList({
   emptyText,
   lang,
   onDelete,
+  onReminderChange,
   onStatusChange,
+  onUpdate,
   tasks,
 }: {
   compact?: boolean
   emptyText?: string
   lang: Lang
   onDelete: (taskId: string) => void
+  onReminderChange: (taskId: string, reminderAt?: string) => void
   onStatusChange: (taskId: string, status: TaskStatus) => void
+  onUpdate: (taskId: string, title: string, note: string) => void
   tasks: Task[]
 }) {
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editNote, setEditNote] = useState('')
+  const [reminderTaskId, setReminderTaskId] = useState<string | null>(null)
+  const [reminderValue, setReminderValue] = useState('')
+  const [reminderMinValue, setReminderMinValue] = useState('')
+
+  const startEditing = (task: Task) => {
+    setReminderTaskId(null)
+    setEditingTaskId(task.id)
+    setEditTitle(task.title)
+    setEditNote(task.note)
+  }
+
+  const stopEditing = () => {
+    setEditingTaskId(null)
+    setEditTitle('')
+    setEditNote('')
+  }
+
+  const saveTask = (taskId: string) => {
+    if (!editTitle.trim()) {
+      return
+    }
+
+    onUpdate(taskId, editTitle, editNote)
+    stopEditing()
+  }
+
+  const startReminderEditing = (task: Task) => {
+    setEditingTaskId(null)
+    setReminderTaskId(task.id)
+    setReminderMinValue(toDateTimeLocalValue(nowIso()))
+    setReminderValue(task.reminderAt ? toDateTimeLocalValue(task.reminderAt) : defaultReminderValue())
+  }
+
+  const stopReminderEditing = () => {
+    setReminderTaskId(null)
+    setReminderValue('')
+    setReminderMinValue('')
+  }
+
+  const saveReminder = (taskId: string) => {
+    const timestamp = new Date(reminderValue).getTime()
+    if (!reminderValue || !Number.isFinite(timestamp) || timestamp <= Date.now()) {
+      return
+    }
+    onReminderChange(taskId, new Date(reminderValue).toISOString())
+    stopReminderEditing()
+  }
+
   if (tasks.length === 0) {
     return <p className="empty">{emptyText || (lang === 'zh' ? '暂无任务。' : 'No tasks.')}</p>
   }
 
   return (
     <div className={compact ? 'task-list compact' : 'task-list'}>
-      {tasks.map((task) => (
-        <article className={`task-row ${task.status}`} key={task.id}>
-          <button
-            className="status-button"
-            onClick={() => onStatusChange(task.id, task.status === 'done' ? 'todo' : 'done')}
-            title={task.status === 'done' ? (lang === 'zh' ? '标为未完成' : 'Mark to-do') : lang === 'zh' ? '标为已完成' : 'Mark done'}
-            type="button"
+      {tasks.map((task) => {
+        const editing = editingTaskId === task.id
+        const editingReminder = reminderTaskId === task.id
+        const reminderIsValid =
+          Boolean(reminderValue) && reminderValue > reminderMinValue
+        return (
+          <article
+            className={`task-row ${task.status} ${editing || editingReminder ? 'editing' : ''}`}
+            key={task.id}
           >
-            {task.status === 'done' ? <Check size={17} /> : <Circle size={17} />}
-          </button>
-          <div className="task-text">
-            <strong>{task.title}</strong>
-            {task.note && <small>{task.note}</small>}
-          </div>
-          <button
-            className="delete-button"
-            onClick={() => onDelete(task.id)}
-            title={lang === 'zh' ? '删除' : 'Delete'}
-            type="button"
-          >
-            <Trash2 size={15} />
-          </button>
-        </article>
-      ))}
+            <button
+              className="status-button"
+              disabled={editing || editingReminder}
+              onClick={() => onStatusChange(task.id, task.status === 'done' ? 'todo' : 'done')}
+              title={task.status === 'done' ? (lang === 'zh' ? '标为未完成' : 'Mark to-do') : lang === 'zh' ? '标为已完成' : 'Mark done'}
+              type="button"
+            >
+              {task.status === 'done' ? <Check size={17} /> : <Circle size={17} />}
+            </button>
+            {editing ? (
+              <form
+                className="task-edit-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  saveTask(task.id)
+                }}
+              >
+                <input
+                  aria-label={I18N[lang].taskTitle}
+                  autoFocus
+                  onChange={(event) => setEditTitle(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      stopEditing()
+                    }
+                  }}
+                  value={editTitle}
+                />
+                <textarea
+                  aria-label={I18N[lang].note}
+                  onChange={(event) => setEditNote(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      stopEditing()
+                    }
+                  }}
+                  placeholder={I18N[lang].note}
+                  rows={2}
+                  value={editNote}
+                />
+                <div className="task-edit-actions">
+                  <button
+                    className="task-cancel-button"
+                    onClick={stopEditing}
+                    title={I18N[lang].cancel}
+                    type="button"
+                  >
+                    <X size={15} />
+                  </button>
+                  <button
+                    className="task-save-button"
+                    disabled={!editTitle.trim()}
+                    title={I18N[lang].save}
+                    type="submit"
+                  >
+                    <Check size={15} />
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="task-text" onDoubleClick={() => startEditing(task)}>
+                  <strong>{task.title}</strong>
+                  {task.note && <small>{task.note}</small>}
+                  {task.reminderAt && (
+                    <small className={task.reminderNotifiedAt ? 'reminder-label fired' : 'reminder-label'}>
+                      <Bell size={11} />
+                      {task.reminderNotifiedAt ? `${I18N[lang].reminded} · ` : ''}
+                      {formatReminderTime(task.reminderAt, lang)}
+                    </small>
+                  )}
+                </div>
+                <div className="task-actions">
+                  <button
+                    className={task.reminderAt ? 'reminder-button active' : 'reminder-button'}
+                    disabled={task.status === 'done'}
+                    onClick={() => startReminderEditing(task)}
+                    title={task.reminderAt ? I18N[lang].changeReminder : I18N[lang].setReminder}
+                    type="button"
+                  >
+                    <Bell size={14} />
+                  </button>
+                  <button
+                    className="edit-button"
+                    onClick={() => startEditing(task)}
+                    title={I18N[lang].editTask}
+                    type="button"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    className="delete-button"
+                    onClick={() => onDelete(task.id)}
+                    title={lang === 'zh' ? '删除' : 'Delete'}
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </>
+            )}
+            {editingReminder && (
+              <form
+                className="reminder-editor"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  saveReminder(task.id)
+                }}
+              >
+                <label>
+                  <span>
+                    <Bell size={13} />
+                    {I18N[lang].reminderTime}
+                  </span>
+                  <input
+                    autoFocus
+                    min={reminderMinValue}
+                    onChange={(event) => setReminderValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        stopReminderEditing()
+                      }
+                    }}
+                    type="datetime-local"
+                    value={reminderValue}
+                  />
+                </label>
+                <div className="reminder-editor-actions">
+                  {task.reminderAt && (
+                    <button
+                      className="reminder-remove-button"
+                      onClick={() => {
+                        onReminderChange(task.id)
+                        stopReminderEditing()
+                      }}
+                      type="button"
+                    >
+                      {I18N[lang].removeReminder}
+                    </button>
+                  )}
+                  <button className="reminder-cancel-button" onClick={stopReminderEditing} type="button">
+                    {I18N[lang].cancel}
+                  </button>
+                  <button
+                    className="reminder-save-button"
+                    disabled={!reminderIsValid}
+                    type="submit"
+                  >
+                    {I18N[lang].saveReminder}
+                  </button>
+                </div>
+              </form>
+            )}
+          </article>
+        )
+      })}
     </div>
   )
 }

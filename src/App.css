@@ -133,54 +133,76 @@ button:disabled {
   align-items: center;
   background: color-mix(in srgb, var(--panel-soft) 88%, var(--panel));
   border-bottom: 1px solid color-mix(in srgb, var(--line) 76%, var(--panel));
+  cursor: grab;
   display: grid;
   gap: 8px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 46px;
   padding: 8px 12px;
+  user-select: none;
+}
+
+.memo-top:active {
+  cursor: grabbing;
 }
 
 .traffic-lights {
   align-items: center;
+  cursor: default;
   display: flex;
-  gap: 8px;
+  gap: 0;
 }
 
 .light {
   align-items: center;
+  background: transparent;
   border: none;
-  border-radius: 50%;
-  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12) inset;
+  border-radius: 8px;
+  box-shadow: none;
   color: rgba(0, 0, 0, 0.55);
+  cursor: default;
   display: grid;
-  height: 13px;
+  height: 28px;
   padding: 0;
   place-items: center;
+  width: 24px;
+}
+
+.light::before {
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12) inset;
+  content: '';
+  grid-area: 1 / 1;
+  height: 13px;
+  transition: transform 0.16s var(--ease);
   width: 13px;
 }
 
-.light.red {
+.light.red::before {
   background: linear-gradient(#ff6f64, #ff4d43);
 }
 
-.light.yellow {
+.light.yellow::before {
   background: linear-gradient(#ffce4f, #f7b223);
 }
 
-.light.green {
+.light.green::before {
   background: linear-gradient(#3fd35a, #1fb83a);
 }
 
 .light svg {
+  grid-area: 1 / 1;
   opacity: 0;
+  position: relative;
   transition: opacity 0.18s ease;
+  z-index: 1;
 }
 
 .traffic-lights:hover .light svg {
   opacity: 1;
 }
 
-.light:active {
+.light:active::before {
   transform: scale(0.86);
 }
 
@@ -528,7 +550,7 @@ button:disabled {
   box-shadow: 0 3px 10px rgba(78, 52, 24, 0.06);
   display: grid;
   gap: 8px;
-  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   min-height: 44px;
   padding: 9px;
   transition: transform 0.18s var(--ease), box-shadow 0.2s ease;
@@ -559,6 +581,8 @@ button:disabled {
 }
 
 .status-button,
+.reminder-button,
+.edit-button,
 .delete-button {
   background: transparent;
   border: 1px solid transparent;
@@ -599,7 +623,166 @@ button:disabled {
   color: var(--danger);
 }
 
+.task-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.reminder-button:hover,
+.reminder-button.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.reminder-button.active {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent) inset;
+}
+
+.edit-button:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.task-edit-form {
+  display: grid;
+  gap: 6px;
+  grid-column: 2 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.task-edit-form input,
+.task-edit-form textarea {
+  background: color-mix(in srgb, var(--panel-soft) 58%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  min-width: 0;
+  outline: 0;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.task-edit-form input:focus,
+.task-edit-form textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.task-edit-form input,
+.task-edit-form textarea {
+  grid-column: 1;
+}
+
+.task-edit-actions {
+  align-content: start;
+  display: grid;
+  gap: 4px;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.task-edit-actions button {
+  border: 1px solid transparent;
+  border-radius: 50%;
+  display: grid;
+  height: 28px;
+  place-items: center;
+  width: 28px;
+}
+
+.task-cancel-button {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.task-save-button {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+}
+
+.reminder-editor {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-soft));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 11px;
+  display: grid;
+  gap: 8px;
+  grid-column: 2 / -1;
+  padding: 9px;
+}
+
+.reminder-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.reminder-editor label > span {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 5px;
+}
+
+.reminder-editor label > span svg {
+  color: var(--accent);
+}
+
+.reminder-editor input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  color-scheme: light;
+  min-height: 34px;
+  min-width: 0;
+  outline: 0;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.app[data-theme='dark'] .reminder-editor input {
+  color-scheme: dark;
+}
+
+.reminder-editor input:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.reminder-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.reminder-editor-actions button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.reminder-remove-button {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  margin-right: auto;
+}
+
+.reminder-cancel-button {
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  color: var(--muted);
+}
+
+.reminder-save-button {
+  background: var(--accent);
+  color: white;
+  font-weight: 760;
+}
+
 .task-text {
+  cursor: text;
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -614,6 +797,20 @@ button:disabled {
 .task-text small,
 .history-item small,
 .empty {
+  color: var(--muted);
+}
+
+.task-text .reminder-label {
+  align-items: center;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 720;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.task-text .reminder-label.fired {
   color: var(--muted);
 }
 
@@ -803,6 +1000,115 @@ button:disabled {
   min-height: 36px;
   min-width: 0;
   outline: 0;
+}
+
+.search-box.global-search {
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: 0 3px 10px rgba(78, 52, 24, 0.05);
+  grid-template-columns: 18px minmax(0, 1fr) 26px;
+  min-height: 42px;
+}
+
+.search-box.global-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.search-clear {
+  background: color-mix(in srgb, var(--line) 46%, transparent);
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  display: grid;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  width: 24px;
+}
+
+.search-clear:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* ===== Reminder toast ===== */
+.reminder-toast {
+  align-items: center;
+  animation: reminder-slide-in 0.34s var(--ease);
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-radius: 14px;
+  bottom: 12px;
+  box-shadow: 0 12px 26px rgba(78, 52, 24, 0.22);
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 32px minmax(0, 1fr) 26px;
+  left: 12px;
+  padding: 9px;
+  position: absolute;
+  right: 12px;
+  z-index: 20;
+}
+
+.reminder-toast-icon {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 10px;
+  color: white;
+  display: grid;
+  height: 32px;
+  place-items: center;
+  width: 32px;
+}
+
+.reminder-toast > div {
+  display: grid;
+  min-width: 0;
+}
+
+.reminder-toast strong,
+.reminder-toast div span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reminder-toast strong {
+  font-size: 12px;
+}
+
+.reminder-toast div span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.reminder-toast > button {
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  display: grid;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  width: 26px;
+}
+
+.reminder-toast > button:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+@keyframes reminder-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .history-list,
@@ -1081,11 +1387,32 @@ button:disabled {
 .compact-tab {
   align-items: center;
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 7px;
+  grid-template-columns: 22px minmax(0, 1fr) 72px;
   height: 100%;
   min-width: 0;
-  padding: 6px 10px;
+  padding: 6px 8px;
+}
+
+.compact-drag-handle {
+  align-items: center;
+  align-self: stretch;
+  border-radius: 9px;
+  color: var(--muted);
+  cursor: grab;
+  display: flex;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+}
+
+.compact-drag-handle:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.compact-drag-handle:active {
+  cursor: grabbing;
 }
 
 .compact-main {
@@ -1094,12 +1421,18 @@ button:disabled {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   border-radius: 999px;
   color: var(--text);
+  cursor: grab;
   display: grid;
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   height: 38px;
   min-width: 0;
   padding: 0 12px;
+  user-select: none;
+}
+
+.compact-main:active {
+  cursor: grabbing;
 }
 
 .compact-main:hover {
